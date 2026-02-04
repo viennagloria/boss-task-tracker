@@ -1,0 +1,29 @@
+display_information:
+  name: Boss Task Tracker
+  description: Track tasks from your boss with a 📌 emoji reaction
+  background_color: "#2c2d30"
+
+features:
+  bot_user:
+    display_name: Boss Task Tracker
+    always_online: true
+
+oauth_config:
+  scopes:
+    bot:
+      - reactions:read
+      - reactions:write
+      - channels:history
+      - groups:history
+      - im:history
+      - mpim:history
+      - users:read
+
+settings:
+  event_subscriptions:
+    request_url: https://boss-task-tracker.onrender.com/slack/events
+    bot_events:
+      - reaction_added
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false
