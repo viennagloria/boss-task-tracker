@@ -119,6 +119,43 @@ export function countPinsByUser(userId: string): number {
   return result[0].values[0][0] as number;
 }
 
+export function getUnsyncedPins(userId: string): PinnedMessage[] {
+  const db = getDatabase();
+  const result = db.exec(
+    `SELECT * FROM pinned_messages
+     WHERE pinned_by_user_id = ? AND notion_page_id IS NULL
+     ORDER BY pinned_at DESC`,
+    [userId]
+  );
+
+  if (result.length === 0) return [];
+
+  return result[0].values.map((row: unknown[]) => rowToPin(result[0].columns, row));
+}
+
+export function updateNotionSync(pinId: number, notionPageId: string): void {
+  const db = getDatabase();
+  db.run(
+    `UPDATE pinned_messages
+     SET notion_page_id = ?, notion_synced_at = datetime('now')
+     WHERE id = ?`,
+    [notionPageId, pinId]
+  );
+  saveDatabase();
+}
+
+export function getPinById(pinId: number): PinnedMessage | null {
+  const db = getDatabase();
+  const result = db.exec(
+    `SELECT * FROM pinned_messages WHERE id = ?`,
+    [pinId]
+  );
+
+  if (result.length === 0 || result[0].values.length === 0) return null;
+
+  return rowToPin(result[0].columns, result[0].values[0]);
+}
+
 function rowToPin(columns: string[], values: unknown[]): PinnedMessage {
   const pin: Record<string, unknown> = {};
   columns.forEach((col, i) => {

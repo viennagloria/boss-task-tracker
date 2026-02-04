@@ -10,6 +10,7 @@
     "test": "vitest"
   },
   "dependencies": {
+    "@notionhq/client": "^2.2.14",
     "@slack/bolt": "^3.17.1",
     "dotenv": "^16.4.1",
     "sql.js": "^1.10.2"

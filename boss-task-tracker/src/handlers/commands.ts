@@ -1,5 +1,7 @@
 import { AllMiddlewareArgs, SlackCommandMiddlewareArgs, KnownBlock } from '@slack/bolt';
-import { getPinsByUser, searchPins, countPinsByUser, PinnedMessage } from '../db/queries';
+import { getPinsByUser, searchPins, countPinsByUser, getUnsyncedPins, updateNotionSync, PinnedMessage } from '../db/queries';
+import { syncPinToNotion } from '../services/notion';
+import { isNotionConfigured } from '../config';
 
 type CommandArgs = SlackCommandMiddlewareArgs & AllMiddlewareArgs;
 
@@ -29,6 +31,8 @@ export async function handlePinsCommand({
         response_type: 'ephemeral',
         blocks: formatPinsList(pins, total, true),
       });
+    } else if (subcommand === 'sync') {
+      await handleSyncCommand(userId, respond);
     } else {
       // Default: show recent pins
       const pins = getPinsByUser(userId, 10);
@@ -145,12 +149,64 @@ function formatPinBlock(pin: PinnedMessage): KnownBlock {
   }
 
   const linkText = pin.permalink ? `<${pin.permalink}|View in Slack>` : '';
+  const notionStatus = pin.notion_page_id ? ' :memo:' : '';
 
   return {
     type: 'section',
     text: {
       type: 'mrkdwn',
-      text: `*From ${authorDisplay} in ${channelDisplay}*\n> ${messagePreview}\n${linkText} • Pinned ${pinnedDate}`,
+      text: `*From ${authorDisplay} in ${channelDisplay}*${notionStatus}\n> ${messagePreview}\n${linkText} • Pinned ${pinnedDate}`,
     },
   };
+}
+
+async function handleSyncCommand(
+  userId: string,
+  respond: (message: { response_type: 'ephemeral' | 'in_channel'; text?: string; blocks?: KnownBlock[] }) => Promise<unknown>
+): Promise<void> {
+  if (!isNotionConfigured()) {
+    await respond({
+      response_type: 'ephemeral',
+      text: 'Notion integration is not configured. Ask your admin to set up NOTION_TOKEN and NOTION_DATABASE_ID.',
+    });
+    return;
+  }
+
+  const unsyncedPins = getUnsyncedPins(userId);
+
+  if (unsyncedPins.length === 0) {
+    await respond({
+      response_type: 'ephemeral',
+      text: 'All your pins are already synced to Notion! :white_check_mark:',
+    });
+    return;
+  }
+
+  await respond({
+    response_type: 'ephemeral',
+    text: `Syncing ${unsyncedPins.length} pin(s) to Notion...`,
+  });
+
+  let successCount = 0;
+  let failCount = 0;
+
+  for (const pin of unsyncedPins) {
+    const result = await syncPinToNotion(pin);
+    if (result.success && result.pageId) {
+      updateNotionSync(pin.id, result.pageId);
+      successCount++;
+    } else {
+      failCount++;
+      console.error(`Failed to sync pin ${pin.id}:`, result.error);
+    }
+  }
+
+  const resultMessage = failCount > 0
+    ? `Synced ${successCount} pin(s) to Notion. ${failCount} failed.`
+    : `Successfully synced ${successCount} pin(s) to Notion! :memo:`;
+
+  await respond({
+    response_type: 'ephemeral',
+    text: resultMessage,
+  });
 }
