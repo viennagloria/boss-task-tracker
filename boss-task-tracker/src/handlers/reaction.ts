@@ -1,5 +1,5 @@
 import { AllMiddlewareArgs, SlackEventMiddlewareArgs } from '@slack/bolt';
-import { insertPin, updateNotionSync } from '../db/queries';
+import { insertPin } from '../db/queries';
 import {
   fetchMessage,
   getPermalink,
@@ -7,8 +7,6 @@ import {
   getChannelName,
   addReaction,
 } from '../services/slack';
-import { syncPinToNotion } from '../services/notion';
-import { isNotionConfigured } from '../config';
 
 type ReactionAddedArgs = SlackEventMiddlewareArgs<'reaction_added'> &
   AllMiddlewareArgs;
@@ -65,21 +63,8 @@ export async function handleReactionAdded({
 
     if (pin) {
       console.log(`Pinned message saved with id ${pin.id}`);
-      // Add confirmation reaction for pin saved
+      // Add confirmation reaction
       await addReaction(client, channel, messageTs, 'white_check_mark');
-
-      // Sync to Notion if configured
-      if (isNotionConfigured()) {
-        const notionResult = await syncPinToNotion(pin);
-        if (notionResult.success && notionResult.pageId) {
-          updateNotionSync(pin.id, notionResult.pageId);
-          console.log(`Synced to Notion: ${notionResult.pageId}`);
-          // Add memo emoji to indicate Notion sync
-          await addReaction(client, channel, messageTs, 'memo');
-        } else {
-          console.error('Failed to sync to Notion:', notionResult.error);
-        }
-      }
     } else {
       console.log('Message was already pinned by this user');
     }

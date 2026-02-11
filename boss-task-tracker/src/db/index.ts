@@ -17,12 +17,17 @@ CREATE TABLE IF NOT EXISTS pinned_messages (
     channel_name TEXT,
     permalink TEXT,
     pinned_at TEXT NOT NULL DEFAULT (datetime('now')),
-    notion_page_id TEXT,
-    notion_synced_at TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
     UNIQUE(message_ts, channel_id, pinned_by_user_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_pinned_by_user ON pinned_messages(pinned_by_user_id);
+CREATE INDEX IF NOT EXISTS idx_status ON pinned_messages(status);
+`;
+
+const MIGRATION = `
+-- Add status column if it doesn't exist (for existing databases)
+ALTER TABLE pinned_messages ADD COLUMN status TEXT NOT NULL DEFAULT 'pending';
 `;
 
 export async function initializeDatabase(): Promise<void> {
@@ -41,6 +46,14 @@ export async function initializeDatabase(): Promise<void> {
   }
 
   db.run(SCHEMA);
+
+  // Run migration for existing databases (add status column if missing)
+  try {
+    db.run(MIGRATION);
+  } catch {
+    // Column already exists, ignore error
+  }
+
   saveDatabase();
 
   console.log(`Database initialized at ${config.DATABASE_PATH}`);

@@ -1,7 +1,5 @@
 import { AllMiddlewareArgs, SlackCommandMiddlewareArgs, KnownBlock } from '@slack/bolt';
-import { getPinsByUser, searchPins, countPinsByUser, getUnsyncedPins, updateNotionSync, PinnedMessage } from '../db/queries';
-import { syncPinToNotion } from '../services/notion';
-import { isNotionConfigured } from '../config';
+import { getPinsByUser, searchPins, countPinsByUser, updatePinStatus, deletePin, PinnedMessage, PinStatus } from '../db/queries';
 
 type CommandArgs = SlackCommandMiddlewareArgs & AllMiddlewareArgs;
 
@@ -29,17 +27,33 @@ export async function handlePinsCommand({
       const total = countPinsByUser(userId);
       await respond({
         response_type: 'ephemeral',
-        blocks: formatPinsList(pins, total, true),
+        blocks: formatPinsList(pins, total, 'all'),
       });
-    } else if (subcommand === 'sync') {
-      await handleSyncCommand(userId, respond);
-    } else {
-      // Default: show recent pins
-      const pins = getPinsByUser(userId, 10);
-      const total = countPinsByUser(userId);
+    } else if (subcommand === 'done') {
+      const pins = getPinsByUser(userId, 50, 0, 'done');
+      const total = countPinsByUser(userId, 'done');
       await respond({
         response_type: 'ephemeral',
-        blocks: formatPinsList(pins, total, false),
+        blocks: formatPinsList(pins, total, 'done'),
+      });
+    } else if (subcommand === 'complete' && args.length > 1) {
+      const pinId = parseInt(args[1], 10);
+      await handleCompleteCommand(userId, pinId, respond);
+    } else if (subcommand === 'delete' && args.length > 1) {
+      const pinId = parseInt(args[1], 10);
+      await handleDeleteCommand(userId, pinId, respond);
+    } else if (subcommand === 'help') {
+      await respond({
+        response_type: 'ephemeral',
+        blocks: formatHelpMessage(),
+      });
+    } else {
+      // Default: show pending pins
+      const pins = getPinsByUser(userId, 10, 0, 'pending');
+      const total = countPinsByUser(userId, 'pending');
+      await respond({
+        response_type: 'ephemeral',
+        blocks: formatPinsList(pins, total, 'pending'),
       });
     }
   } catch (error) {
@@ -54,28 +68,37 @@ export async function handlePinsCommand({
 function formatPinsList(
   pins: PinnedMessage[],
   total: number,
-  showAll: boolean
+  view: 'pending' | 'done' | 'all'
 ): KnownBlock[] {
   if (pins.length === 0) {
+    const emptyMessages = {
+      pending: "*No pending pins.*\n\nReact to a message with :pushpin: to save it!",
+      done: "*No completed pins yet.*\n\nUse `/pins complete <id>` to mark pins as done.",
+      all: "*You don't have any pinned messages yet.*\n\nReact to a message with :pushpin: to save it!",
+    };
     return [
       {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: "*You don't have any pinned messages yet.*\n\nReact to a message with :pushpin: to save it!",
+          text: emptyMessages[view],
         },
       },
     ];
   }
+
+  const titles = {
+    pending: `*Pending Pins* (${pins.length} of ${total})`,
+    done: `*Completed Pins* (${pins.length} of ${total})`,
+    all: `*All Pins* (${pins.length} of ${total})`,
+  };
 
   const blocks: KnownBlock[] = [
     {
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: showAll
-          ? `*All Your Pins* (${pins.length} of ${total})`
-          : `*Your Recent Pins* (showing ${pins.length} of ${total})`,
+        text: titles[view],
       },
     },
     { type: 'divider' },
@@ -85,17 +108,15 @@ function formatPinsList(
     blocks.push(formatPinBlock(pin));
   }
 
-  if (!showAll && total > 10) {
-    blocks.push({
-      type: 'context',
-      elements: [
-        {
-          type: 'mrkdwn',
-          text: `Use \`/pins all\` to see all ${total} pins, or \`/pins search <query>\` to search.`,
-        },
-      ],
-    });
-  }
+  blocks.push({
+    type: 'context',
+    elements: [
+      {
+        type: 'mrkdwn',
+        text: '`/pins` pending | `/pins done` | `/pins all` | `/pins complete <id>` | `/pins delete <id>` | `/pins help`',
+      },
+    ],
+  });
 
   return blocks;
 }
@@ -149,64 +170,89 @@ function formatPinBlock(pin: PinnedMessage): KnownBlock {
   }
 
   const linkText = pin.permalink ? `<${pin.permalink}|View in Slack>` : '';
-  const notionStatus = pin.notion_page_id ? ' :memo:' : '';
+  const statusIcon = pin.status === 'done' ? ':white_check_mark:' : ':hourglass_flowing_sand:';
 
   return {
     type: 'section',
     text: {
       type: 'mrkdwn',
-      text: `*From ${authorDisplay} in ${channelDisplay}*${notionStatus}\n> ${messagePreview}\n${linkText} • Pinned ${pinnedDate}`,
+      text: `${statusIcon} *#${pin.id}* - From ${authorDisplay} in ${channelDisplay}\n> ${messagePreview}\n${linkText} • Pinned ${pinnedDate}`,
     },
   };
 }
 
-async function handleSyncCommand(
+async function handleCompleteCommand(
   userId: string,
-  respond: (message: { response_type: 'ephemeral' | 'in_channel'; text?: string; blocks?: KnownBlock[] }) => Promise<unknown>
+  pinId: number,
+  respond: (message: { response_type: 'ephemeral' | 'in_channel'; text: string }) => Promise<unknown>
 ): Promise<void> {
-  if (!isNotionConfigured()) {
+  if (isNaN(pinId)) {
     await respond({
       response_type: 'ephemeral',
-      text: 'Notion integration is not configured. Ask your admin to set up NOTION_TOKEN and NOTION_DATABASE_ID.',
+      text: 'Invalid pin ID. Use `/pins` to see your pins and their IDs.',
     });
     return;
   }
 
-  const unsyncedPins = getUnsyncedPins(userId);
+  const success = updatePinStatus(pinId, userId, 'done');
 
-  if (unsyncedPins.length === 0) {
+  if (success) {
     await respond({
       response_type: 'ephemeral',
-      text: 'All your pins are already synced to Notion! :white_check_mark:',
+      text: `:white_check_mark: Pin #${pinId} marked as complete!`,
+    });
+  } else {
+    await respond({
+      response_type: 'ephemeral',
+      text: `Pin #${pinId} not found. Use \`/pins\` to see your pins.`,
+    });
+  }
+}
+
+async function handleDeleteCommand(
+  userId: string,
+  pinId: number,
+  respond: (message: { response_type: 'ephemeral' | 'in_channel'; text: string }) => Promise<unknown>
+): Promise<void> {
+  if (isNaN(pinId)) {
+    await respond({
+      response_type: 'ephemeral',
+      text: 'Invalid pin ID. Use `/pins` to see your pins and their IDs.',
     });
     return;
   }
 
-  await respond({
-    response_type: 'ephemeral',
-    text: `Syncing ${unsyncedPins.length} pin(s) to Notion...`,
-  });
+  const success = deletePin(pinId, userId);
 
-  let successCount = 0;
-  let failCount = 0;
-
-  for (const pin of unsyncedPins) {
-    const result = await syncPinToNotion(pin);
-    if (result.success && result.pageId) {
-      updateNotionSync(pin.id, result.pageId);
-      successCount++;
-    } else {
-      failCount++;
-      console.error(`Failed to sync pin ${pin.id}:`, result.error);
-    }
+  if (success) {
+    await respond({
+      response_type: 'ephemeral',
+      text: `:wastebasket: Pin #${pinId} deleted.`,
+    });
+  } else {
+    await respond({
+      response_type: 'ephemeral',
+      text: `Pin #${pinId} not found. Use \`/pins\` to see your pins.`,
+    });
   }
+}
 
-  const resultMessage = failCount > 0
-    ? `Synced ${successCount} pin(s) to Notion. ${failCount} failed.`
-    : `Successfully synced ${successCount} pin(s) to Notion! :memo:`;
-
-  await respond({
-    response_type: 'ephemeral',
-    text: resultMessage,
-  });
+function formatHelpMessage(): KnownBlock[] {
+  return [
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: '*Boss Task Tracker - Help*',
+      },
+    },
+    { type: 'divider' },
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*How to pin a message:*\nReact to any message with :pushpin: to save it as a task.\n\n*Commands:*\n• \`/pins\` - Show pending tasks\n• \`/pins all\` - Show all tasks\n• \`/pins done\` - Show completed tasks\n• \`/pins search <query>\` - Search your tasks\n• \`/pins complete <id>\` - Mark a task as done\n• \`/pins delete <id>\` - Remove a task\n• \`/pins help\` - Show this help message`,
+      },
+    },
+  ];
 }

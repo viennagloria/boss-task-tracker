@@ -1,5 +1,7 @@
 import { getDatabase, saveDatabase } from './index';
 
+export type PinStatus = 'pending' | 'done';
+
 export interface PinnedMessage {
   id: number;
   message_ts: string;
@@ -11,8 +13,7 @@ export interface PinnedMessage {
   channel_name: string | null;
   permalink: string | null;
   pinned_at: string;
-  notion_page_id: string | null;
-  notion_synced_at: string | null;
+  status: PinStatus;
 }
 
 export interface InsertPinData {
@@ -75,16 +76,23 @@ export function insertPin(data: InsertPinData): PinnedMessage | null {
 export function getPinsByUser(
   userId: string,
   limit: number = 10,
-  offset: number = 0
+  offset: number = 0,
+  status?: PinStatus
 ): PinnedMessage[] {
   const db = getDatabase();
-  const result = db.exec(
-    `SELECT * FROM pinned_messages
-     WHERE pinned_by_user_id = ?
-     ORDER BY pinned_at DESC
-     LIMIT ? OFFSET ?`,
-    [userId, limit, offset]
-  );
+
+  let query = `SELECT * FROM pinned_messages WHERE pinned_by_user_id = ?`;
+  const params: unknown[] = [userId];
+
+  if (status) {
+    query += ` AND status = ?`;
+    params.push(status);
+  }
+
+  query += ` ORDER BY pinned_at DESC LIMIT ? OFFSET ?`;
+  params.push(limit, offset);
+
+  const result = db.exec(query, params);
 
   if (result.length === 0) return [];
 
@@ -108,52 +116,63 @@ export function searchPins(userId: string, query: string): PinnedMessage[] {
   return result[0].values.map((row: unknown[]) => rowToPin(result[0].columns, row));
 }
 
-export function countPinsByUser(userId: string): number {
+export function countPinsByUser(userId: string, status?: PinStatus): number {
   const db = getDatabase();
-  const result = db.exec(
-    `SELECT COUNT(*) as count FROM pinned_messages WHERE pinned_by_user_id = ?`,
-    [userId]
-  );
+
+  let query = `SELECT COUNT(*) as count FROM pinned_messages WHERE pinned_by_user_id = ?`;
+  const params: unknown[] = [userId];
+
+  if (status) {
+    query += ` AND status = ?`;
+    params.push(status);
+  }
+
+  const result = db.exec(query, params);
 
   if (result.length === 0) return 0;
   return result[0].values[0][0] as number;
 }
 
-export function getUnsyncedPins(userId: string): PinnedMessage[] {
+export function getPinById(pinId: number, userId: string): PinnedMessage | null {
   const db = getDatabase();
   const result = db.exec(
-    `SELECT * FROM pinned_messages
-     WHERE pinned_by_user_id = ? AND notion_page_id IS NULL
-     ORDER BY pinned_at DESC`,
-    [userId]
-  );
-
-  if (result.length === 0) return [];
-
-  return result[0].values.map((row: unknown[]) => rowToPin(result[0].columns, row));
-}
-
-export function updateNotionSync(pinId: number, notionPageId: string): void {
-  const db = getDatabase();
-  db.run(
-    `UPDATE pinned_messages
-     SET notion_page_id = ?, notion_synced_at = datetime('now')
-     WHERE id = ?`,
-    [notionPageId, pinId]
-  );
-  saveDatabase();
-}
-
-export function getPinById(pinId: number): PinnedMessage | null {
-  const db = getDatabase();
-  const result = db.exec(
-    `SELECT * FROM pinned_messages WHERE id = ?`,
-    [pinId]
+    `SELECT * FROM pinned_messages WHERE id = ? AND pinned_by_user_id = ?`,
+    [pinId, userId]
   );
 
   if (result.length === 0 || result[0].values.length === 0) return null;
 
   return rowToPin(result[0].columns, result[0].values[0]);
+}
+
+export function updatePinStatus(pinId: number, userId: string, status: PinStatus): boolean {
+  const db = getDatabase();
+
+  // Verify ownership
+  const pin = getPinById(pinId, userId);
+  if (!pin) return false;
+
+  db.run(
+    `UPDATE pinned_messages SET status = ? WHERE id = ? AND pinned_by_user_id = ?`,
+    [status, pinId, userId]
+  );
+  saveDatabase();
+  return true;
+}
+
+export function deletePin(pinId: number, userId: string): boolean {
+  const db = getDatabase();
+
+  // Verify ownership
+  const pin = getPinById(pinId, userId);
+  if (!pin) return false;
+
+  db.run(
+    `DELETE FROM pinned_messages WHERE id = ? AND pinned_by_user_id = ?`,
+    [pinId, userId]
+  );
+  saveDatabase();
+  return true;
 }
 
 function rowToPin(columns: string[], values: unknown[]): PinnedMessage {
