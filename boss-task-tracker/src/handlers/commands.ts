@@ -1,5 +1,5 @@
 import { AllMiddlewareArgs, SlackCommandMiddlewareArgs, KnownBlock } from '@slack/bolt';
-import { getPinsByUser, searchPins, countPinsByUser, updatePinStatus, deletePin, PinnedMessage, PinStatus } from '../db/queries';
+import { getPinsByUser, searchPins, countPinsByUser, updatePinStatus, deletePin, getChannelsByUser, PinnedMessage, PinStatus } from '../db/queries';
 
 type CommandArgs = SlackCommandMiddlewareArgs & AllMiddlewareArgs;
 
@@ -42,6 +42,20 @@ export async function handlePinsCommand({
     } else if (subcommand === 'delete' && args.length > 1) {
       const pinId = parseInt(args[1], 10);
       await handleDeleteCommand(userId, pinId, respond);
+    } else if (subcommand === 'channel' && args.length > 1) {
+      const channelName = args[1];
+      const pins = getPinsByUser(userId, 50, 0, undefined, channelName);
+      const total = countPinsByUser(userId, undefined, channelName);
+      await respond({
+        response_type: 'ephemeral',
+        blocks: formatChannelPins(pins, total, channelName),
+      });
+    } else if (subcommand === 'channels') {
+      const channels = getChannelsByUser(userId);
+      await respond({
+        response_type: 'ephemeral',
+        blocks: formatChannelsList(channels),
+      });
     } else if (subcommand === 'help') {
       await respond({
         response_type: 'ephemeral',
@@ -113,7 +127,7 @@ function formatPinsList(
     elements: [
       {
         type: 'mrkdwn',
-        text: '`/pins` pending | `/pins done` | `/pins all` | `/pins complete <id>` | `/pins delete <id>` | `/pins help`',
+        text: '`/pins` | `/pins done` | `/pins all` | `/pins channels` | `/pins channel <name>` | `/pins help`',
       },
     ],
   });
@@ -237,6 +251,67 @@ async function handleDeleteCommand(
   }
 }
 
+function formatChannelPins(
+  pins: PinnedMessage[],
+  total: number,
+  channelName: string
+): KnownBlock[] {
+  if (pins.length === 0) {
+    return [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*No pins in #${channelName}*`,
+        },
+      },
+    ];
+  }
+
+  const blocks: KnownBlock[] = [
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*Pins from #${channelName}* (${pins.length} total)`,
+      },
+    },
+    { type: 'divider' },
+  ];
+
+  for (const pin of pins) {
+    blocks.push(formatPinBlock(pin));
+  }
+
+  return blocks;
+}
+
+function formatChannelsList(channels: string[]): KnownBlock[] {
+  if (channels.length === 0) {
+    return [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: "*You don't have pins in any channels yet.*",
+        },
+      },
+    ];
+  }
+
+  const channelList = channels.map((ch) => `• #${ch}`).join('\n');
+
+  return [
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*Channels with pins:*\n${channelList}\n\nUse \`/pins channel <name>\` to filter by channel.`,
+      },
+    },
+  ];
+}
+
 function formatHelpMessage(): KnownBlock[] {
   return [
     {
@@ -251,7 +326,7 @@ function formatHelpMessage(): KnownBlock[] {
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `*How to pin a message:*\nReact to any message with :pushpin: to save it as a task.\n\n*Commands:*\n• \`/pins\` - Show pending tasks\n• \`/pins all\` - Show all tasks\n• \`/pins done\` - Show completed tasks\n• \`/pins search <query>\` - Search your tasks\n• \`/pins complete <id>\` - Mark a task as done\n• \`/pins delete <id>\` - Remove a task\n• \`/pins help\` - Show this help message`,
+        text: `*How to pin a message:*\nReact to any message with :pushpin: to save it as a task.\n\n*Commands:*\n• \`/pins\` - Show pending tasks\n• \`/pins all\` - Show all tasks\n• \`/pins done\` - Show completed tasks\n• \`/pins channel <name>\` - Show pins from a channel\n• \`/pins channels\` - List all channels with pins\n• \`/pins search <query>\` - Search your tasks\n• \`/pins complete <id>\` - Mark a task as done\n• \`/pins delete <id>\` - Remove a task\n• \`/pins help\` - Show this help message`,
       },
     },
   ];

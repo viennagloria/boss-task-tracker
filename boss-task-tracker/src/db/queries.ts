@@ -77,7 +77,8 @@ export function getPinsByUser(
   userId: string,
   limit: number = 10,
   offset: number = 0,
-  status?: PinStatus
+  status?: PinStatus,
+  channelName?: string
 ): PinnedMessage[] {
   const db = getDatabase();
 
@@ -87,6 +88,11 @@ export function getPinsByUser(
   if (status) {
     query += ` AND status = ?`;
     params.push(status);
+  }
+
+  if (channelName) {
+    query += ` AND channel_name = ?`;
+    params.push(channelName);
   }
 
   query += ` ORDER BY pinned_at DESC LIMIT ? OFFSET ?`;
@@ -116,7 +122,7 @@ export function searchPins(userId: string, query: string): PinnedMessage[] {
   return result[0].values.map((row: unknown[]) => rowToPin(result[0].columns, row));
 }
 
-export function countPinsByUser(userId: string, status?: PinStatus): number {
+export function countPinsByUser(userId: string, status?: PinStatus, channelName?: string): number {
   const db = getDatabase();
 
   let query = `SELECT COUNT(*) as count FROM pinned_messages WHERE pinned_by_user_id = ?`;
@@ -127,10 +133,29 @@ export function countPinsByUser(userId: string, status?: PinStatus): number {
     params.push(status);
   }
 
+  if (channelName) {
+    query += ` AND channel_name = ?`;
+    params.push(channelName);
+  }
+
   const result = db.exec(query, params);
 
   if (result.length === 0) return 0;
   return result[0].values[0][0] as number;
+}
+
+export function getChannelsByUser(userId: string): string[] {
+  const db = getDatabase();
+  const result = db.exec(
+    `SELECT DISTINCT channel_name FROM pinned_messages
+     WHERE pinned_by_user_id = ? AND channel_name IS NOT NULL
+     ORDER BY channel_name ASC`,
+    [userId]
+  );
+
+  if (result.length === 0) return [];
+
+  return result[0].values.map((row) => row[0] as string);
 }
 
 export function getPinById(pinId: number, userId: string): PinnedMessage | null {
