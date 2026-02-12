@@ -31,32 +31,47 @@ ALTER TABLE pinned_messages ADD COLUMN status TEXT NOT NULL DEFAULT 'pending';
 `;
 
 export async function initializeDatabase(): Promise<void> {
-  const SQL = await initSqlJs();
+  console.log('Starting database initialization...');
 
-  const dbDir = path.dirname(config.DATABASE_PATH);
-  if (!fs.existsSync(dbDir)) {
-    fs.mkdirSync(dbDir, { recursive: true });
-  }
-
-  if (fs.existsSync(config.DATABASE_PATH)) {
-    const buffer = fs.readFileSync(config.DATABASE_PATH);
-    db = new SQL.Database(buffer);
-  } else {
-    db = new SQL.Database();
-  }
-
-  db.run(SCHEMA);
-
-  // Run migration for existing databases (add status column if missing)
   try {
-    db.run(MIGRATION);
-  } catch {
-    // Column already exists, ignore error
+    const SQL = await initSqlJs();
+    console.log('sql.js loaded successfully');
+
+    const dbDir = path.dirname(config.DATABASE_PATH);
+    console.log(`Database directory: ${dbDir}`);
+
+    if (!fs.existsSync(dbDir)) {
+      console.log(`Creating directory: ${dbDir}`);
+      fs.mkdirSync(dbDir, { recursive: true });
+    }
+
+    if (fs.existsSync(config.DATABASE_PATH)) {
+      console.log(`Loading existing database from ${config.DATABASE_PATH}`);
+      const buffer = fs.readFileSync(config.DATABASE_PATH);
+      db = new SQL.Database(buffer);
+    } else {
+      console.log('Creating new database');
+      db = new SQL.Database();
+    }
+
+    console.log('Running schema...');
+    db.run(SCHEMA);
+
+    // Run migration for existing databases (add status column if missing)
+    try {
+      db.run(MIGRATION);
+    } catch (err) {
+      // Column already exists, ignore error
+      console.log('Migration skipped (column already exists)');
+    }
+
+    saveDatabase();
+
+    console.log(`Database initialized at ${config.DATABASE_PATH}`);
+  } catch (error) {
+    console.error('Database initialization failed:', error);
+    throw error;
   }
-
-  saveDatabase();
-
-  console.log(`Database initialized at ${config.DATABASE_PATH}`);
 }
 
 export function saveDatabase(): void {
