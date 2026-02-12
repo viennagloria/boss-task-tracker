@@ -1,102 +1,124 @@
-# Boss Tasks Auto-Tracker
+# Boss Task Tracker
+
+A Slack bot that turns pinned messages into a personal task management system, entirely within Slack.
 
 ## What This Does
-When you (the PM/CoS) react with 📌 emoji to any message from your boss, automatically creates a task in your Notion task dashboard. You stay in control of what becomes a task—no training your boss on new workflows.
 
-## Primary Use Case (MVP)
-**As a PM/CoS, when my boss posts something that needs action and I react with 📌, I want it automatically added to my Notion Tasks database with:**
-- Task description (the full message text)
-- Who posted it (your boss's name)
-- Channel it came from
-- Link to original Slack message
-- Date created
-- Status (defaults to "To Do")
+React to any Slack message with 📌 emoji to save it as a task. View, filter, and manage your tasks using slash commands—all without leaving Slack.
 
-**Core User Flow:**
-1. Boss posts: "We need to update the pricing page by Friday"
-2. You react with 📌 emoji (flags it as a task)
-3. Bot detects your emoji reaction event
-4. Bot creates new entry in Notion Tasks database
-5. Bot confirms with ✅ reaction (so you know it logged)
+## Features
 
-**Why emoji-triggered?**
-- You control what becomes a task (no parsing ambiguity)
-- Works in any channel (DMs, public channels, wherever boss posts)
-- No training your boss on new workflows
-- Zero parsing complexity (avoids LLM brittleness)
-- Easy to test
-- Fast in-the-moment triage (📌 as you read Slack)
+- **Pin to Save**: React with :pushpin: to any message to save it as a task
+- **Status Tracking**: Mark tasks as pending or done
+- **Channel Filtering**: View tasks from specific channels
+- **Search**: Find tasks by keyword
+- **Delete**: Remove tasks you no longer need
+- **Multi-User**: Each team member has their own private task list
+- **SQLite Storage**: Persistent task storage with sql.js
 
-## Technical Approach
-- **Stack:** Python + FastAPI
-- **Integrations:** Slack Events API (reaction_added event) + Notion API
-- **Parsing:** None needed! Just grab message text from reaction event
-- **Deployment:** Fly.io or Render
-- **Database:** Postgres for tracking processed reactions (prevent duplicates)
+## Commands
 
-## Milestones
+- `/pins` - Show pending tasks
+- `/pins all` - Show all tasks
+- `/pins done` - Show completed tasks
+- `/pins channel <name>` - Show pins from a specific channel
+- `/pins channels` - List all channels with pins
+- `/pins search <query>` - Search your tasks
+- `/pins complete <id>` - Mark a task as done
+- `/pins delete <id>` - Remove a task
+- `/pins help` - Show help message
 
-### Week 1-2: Core Integration
-- [ ] Slack Events API setup (listen for `reaction_added` events with 📌 emoji)
-- [ ] Notion API setup (write to Tasks database)
-- [ ] Basic reaction → Notion task flow working locally
-- [ ] Deploy to production (even if minimal)
+## How It Works
 
-### Week 3-4: Reliability & UX
-- [ ] Duplicate detection (don't log same reaction twice)
-- [ ] Add ✅ confirmation reaction after task created
-- [ ] Handle edge cases (deleted messages, private channels)
-- [ ] Add tests for event processing logic
-- [ ] Optional: Filter to only create tasks when you 📌 (ignore other users' reactions)
-- [ ] Optional: Filter to only messages FROM your boss (ignore reactions to other people's messages)
+1. **React with 📌**: When you react to any message with :pushpin:, the bot saves it to your personal task list
+2. **Confirmation**: Bot adds ✅ reaction to confirm the task was saved
+3. **View Tasks**: Use `/pins` to see your pending tasks
+4. **Manage**: Complete or delete tasks as needed
 
-### Week 5-6: Production Hardening
-- [ ] CI/CD pipeline
-- [ ] Logging and monitoring (track failed task creations)
-- [ ] Documentation (setup, architecture, runbook)
-- [ ] Optional: Allow 🗑️ emoji to remove task from Notion
+## Tech Stack
 
-## Non-Goals (What We're NOT Building)
-- Natural language parsing (no "detect if this sounds like a task")
-- Multiple Notion databases (just one Tasks database)
-- Task assignments/due dates (Notion has built-in features for this)
-- Custom dashboard UI (just using Notion's database views)
-- Two-way sync (Notion → Slack updates)
-- Historical message scanning (only new reactions going forward)
-- Support for multiple emoji types (just 📌 for MVP)
-- Task completion tracking via Slack (update status in Notion directly)
-- Thread/reply handling (just top-level messages)
-- Rich formatting preservation (plain text is fine)
-- User permissions/filtering for MVP (can add "only me" or "only boss's messages" filters later)
+- **Runtime**: Node.js 20 with TypeScript
+- **Framework**: Slack Bolt SDK (@slack/bolt)
+- **Database**: SQLite via sql.js (no native compilation required)
+- **Deployment**: Render.com
 
-## Success Criteria
-By Week 6, this project ships if:
-- [ ] Public URL that receives Slack reaction events
-- [ ] 📌 emoji on any message reliably creates Notion task
-- [ ] Basic tests cover event processing logic
-- [ ] CI runs tests on PRs
-- [ ] Documented setup for local dev + production
-- [ ] Runbook for common issues (duplicate handling, failed API calls)
+## Setup
 
-## Questions to Answer Before Starting
-1. Which Slack workspace will this run in?
-2. Which Notion database will receive tasks? (create it now with these fields: Title, Author, Channel, Slack Link, Date, Status)
-3. Should it only create tasks when YOU add 📌, or anyone on the team? (Recommend: just you for MVP)
-4. Should it only track messages FROM your boss, or any message you 📌? (Recommend: any message for MVP, you control with the emoji)
+### Environment Variables
 
-## Example Test Scenarios
-1. You react with 📌 to boss's message "Update pricing page" → Task appears in Notion with full text
-2. Someone else reacts with 📌 → Nothing happens (or: also creates task if you want team-wide)
-3. You react with different emoji to boss's message → Nothing happens
-4. You react with 📌 to same message twice → Only one task created
-5. Bot confirms with ✅ reaction after logging → You see confirmation
-6. You react with 📌 to message in private DM → Task still created
+Create a `.env` file based on `.env.example`:
 
-## Risks & Mitigations
-| Risk | Mitigation |
-|------|------------|
-| Bot misses reactions if offline | Slack Events API has retry logic; log failures for manual backfill |
-| People accidentally create tasks | Simple fix: make it easy to delete in Notion (or add 🗑️ emoji to remove) |
-| Duplicate reactions create duplicate tasks | Track processed reaction events in Postgres |
-| API rate limits | Start small, add basic rate limiting if needed |
-| Message deleted after reaction | Store message text in DB at reaction time (don't rely on fetching later) |
+```bash
+SLACK_BOT_TOKEN=xoxb-your-bot-token
+SLACK_SIGNING_SECRET=your-signing-secret
+DATABASE_PATH=./data/boss-tasks.db
+PORT=3000
+```
+
+### Local Development
+
+```bash
+cd boss-task-tracker
+npm install
+npm run dev
+```
+
+### Build for Production
+
+```bash
+npm run build
+npm start
+```
+
+## Deployment
+
+This app is configured for Render.com deployment:
+
+1. Push to main branch
+2. Render automatically rebuilds and deploys
+3. Health check endpoint: `/health`
+4. SQLite database persists in `/app/data` directory
+
+## Database Schema
+
+```sql
+CREATE TABLE pinned_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_ts TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    message_text TEXT NOT NULL,
+    message_author_id TEXT NOT NULL,
+    message_author_name TEXT,
+    pinned_by_user_id TEXT NOT NULL,
+    channel_name TEXT,
+    permalink TEXT,
+    pinned_at TEXT NOT NULL DEFAULT (datetime('now')),
+    status TEXT NOT NULL DEFAULT 'pending',
+    UNIQUE(message_ts, channel_id, pinned_by_user_id)
+);
+```
+
+## Slack App Configuration
+
+Required OAuth Scopes:
+- `reactions:read` - Detect pushpin reactions
+- `channels:history` - Read message content in public channels
+- `groups:history` - Read message content in private channels
+- `im:history` - Read message content in DMs
+- `mpim:history` - Read message content in group DMs
+- `users:read` - Get user display names
+- `channels:read` - Get channel names
+- `commands` - Handle slash commands
+- `reactions:write` - Add confirmation reactions
+
+Event Subscriptions:
+- `reaction_added` - Triggered when user reacts with emoji
+
+Slash Commands:
+- `/pins` - Main command for viewing and managing tasks
+
+## Privacy
+
+- Each user only sees their own pinned messages
+- Database queries filter by `pinned_by_user_id`
+- Assignment is implicit through @mentions in message content
