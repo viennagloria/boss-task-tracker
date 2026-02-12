@@ -5,6 +5,26 @@ import { config } from '../config';
 
 let db: Database;
 
+// Get the path to sql.js WASM file in node_modules
+function getWasmPath(): string {
+  // In production (Render), node_modules is at /app/node_modules
+  // In development, it's relative to the project root
+  const possiblePaths = [
+    path.join(__dirname, '../../node_modules/sql.js/dist/sql-wasm.wasm'),
+    '/app/node_modules/sql.js/dist/sql-wasm.wasm',
+    path.join(process.cwd(), 'node_modules/sql.js/dist/sql-wasm.wasm'),
+  ];
+
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      return p;
+    }
+  }
+
+  // Fallback - let sql.js try to find it
+  return '';
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS pinned_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,7 +54,13 @@ export async function initializeDatabase(): Promise<void> {
   console.log('Starting database initialization...');
 
   try {
-    const SQL = await initSqlJs();
+    const wasmPath = getWasmPath();
+    console.log(`WASM path: ${wasmPath || 'default (let sql.js find it)'}`);
+
+    // Configure WASM file location for production environments
+    const sqlConfig = wasmPath ? { locateFile: () => wasmPath } : {};
+    // @ts-expect-error sql.js types don't include config parameter but it's supported
+    const SQL = await initSqlJs(sqlConfig);
     console.log('sql.js loaded successfully');
 
     const dbDir = path.dirname(config.DATABASE_PATH);
