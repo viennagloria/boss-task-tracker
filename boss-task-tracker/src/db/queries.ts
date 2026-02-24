@@ -107,11 +107,12 @@ export function getPinsByUser(
 
 export function searchPins(userId: string, query: string): PinnedMessage[] {
   const db = getDatabase();
-  const searchPattern = `%${query}%`;
+  const escapedQuery = query.replace(/[%_\\]/g, (char) => `\\${char}`);
+  const searchPattern = `%${escapedQuery}%`;
   const result = db.exec(
     `SELECT * FROM pinned_messages
      WHERE pinned_by_user_id = ?
-       AND (message_text LIKE ? OR channel_name LIKE ? OR message_author_name LIKE ?)
+       AND (message_text LIKE ? ESCAPE '\\' OR channel_name LIKE ? ESCAPE '\\' OR message_author_name LIKE ? ESCAPE '\\')
      ORDER BY pinned_at DESC
      LIMIT 20`,
     [userId, searchPattern, searchPattern, searchPattern]
@@ -201,9 +202,22 @@ export function deletePin(pinId: number, userId: string): boolean {
 }
 
 function rowToPin(columns: string[], values: unknown[]): PinnedMessage {
-  const pin: Record<string, unknown> = {};
-  columns.forEach((col, i) => {
-    pin[col] = values[i];
-  });
-  return pin as unknown as PinnedMessage;
+  function col(name: string): unknown {
+    const idx = columns.indexOf(name);
+    return idx >= 0 ? values[idx] : undefined;
+  }
+
+  return {
+    id: col('id') as number,
+    message_ts: col('message_ts') as string,
+    channel_id: col('channel_id') as string,
+    message_text: col('message_text') as string,
+    message_author_id: col('message_author_id') as string,
+    message_author_name: (col('message_author_name') as string | null) ?? null,
+    pinned_by_user_id: col('pinned_by_user_id') as string,
+    channel_name: (col('channel_name') as string | null) ?? null,
+    permalink: (col('permalink') as string | null) ?? null,
+    pinned_at: col('pinned_at') as string,
+    status: col('status') as PinStatus,
+  };
 }

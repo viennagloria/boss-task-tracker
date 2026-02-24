@@ -7,6 +7,12 @@ features:
   bot_user:
     display_name: Boss Task Tracker
     always_online: true
+  slash_commands:
+    - command: /pins
+      url: https://boss-task-tracker.onrender.com/slack/events
+      description: View and manage your pinned tasks
+      usage_hint: "[all|done|search <query>|complete <id>|delete <id>|channels|channel <name>|help]"
+      should_escape: false
 
 oauth_config:
   scopes:
@@ -14,10 +20,12 @@ oauth_config:
       - reactions:read
       - reactions:write
       - channels:history
+      - channels:read
       - groups:history
       - im:history
       - mpim:history
       - users:read
+      - commands
 
 settings:
   event_subscriptions:
