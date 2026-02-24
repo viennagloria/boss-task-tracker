@@ -51,44 +51,33 @@ ALTER TABLE pinned_messages ADD COLUMN status TEXT NOT NULL DEFAULT 'pending';
 `;
 
 export async function initializeDatabase(): Promise<void> {
-  console.log('Starting database initialization...');
-
   try {
     const wasmPath = getWasmPath();
-    console.log(`WASM path: ${wasmPath || 'default (let sql.js find it)'}`);
 
     // Configure WASM file location for production environments
     const sqlConfig = wasmPath ? { locateFile: () => wasmPath } : {};
     // @ts-expect-error sql.js types don't include config parameter but it's supported
     const SQL = await initSqlJs(sqlConfig);
-    console.log('sql.js loaded successfully');
 
     const dbDir = path.dirname(config.DATABASE_PATH);
-    console.log(`Database directory: ${dbDir}`);
-
     if (!fs.existsSync(dbDir)) {
-      console.log(`Creating directory: ${dbDir}`);
       fs.mkdirSync(dbDir, { recursive: true });
     }
 
     if (fs.existsSync(config.DATABASE_PATH)) {
-      console.log(`Loading existing database from ${config.DATABASE_PATH}`);
       const buffer = fs.readFileSync(config.DATABASE_PATH);
       db = new SQL.Database(buffer);
     } else {
-      console.log('Creating new database');
       db = new SQL.Database();
     }
 
-    console.log('Running schema...');
     db.run(SCHEMA);
 
     // Run migration for existing databases (add status column if missing)
     try {
       db.run(MIGRATION);
-    } catch (err) {
+    } catch {
       // Column already exists, ignore error
-      console.log('Migration skipped (column already exists)');
     }
 
     saveDatabase();
